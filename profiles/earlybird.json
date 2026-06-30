@@ -1,0 +1,13 @@
+{
+    "name": "EarlyBird APC",
+    "author": "mold",
+    "template": "earlybird",
+    "target_process": "C:\\Windows\\System32\\cmd.exe",
+    "arch": "x64",
+    "compile": {
+        "automatic": true,
+        "gcc": "x86_64-w64-mingw32-gcc",
+        "strip": true
+    },
+    "output_dir": "./output"
+}

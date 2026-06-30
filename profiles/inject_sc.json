@@ -1,0 +1,14 @@
+{
+    "name": "Direct Syscall Remote Thread Injection",
+    "author": "mold",
+    "template": "inject_sc",
+    "target_process": "explorer.exe",
+    "arch": "x64",
+    "compile": {
+        "automatic": true,
+        "gcc": "x86_64-w64-mingw32-gcc",
+        "strip": true,
+        "output_type": "exe"
+    },
+    "output_dir": "./output"
+}

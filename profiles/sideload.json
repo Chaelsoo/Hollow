@@ -1,0 +1,14 @@
+{
+    "name": "DLL Sideload",
+    "author": "mold",
+    "template": "sideload",
+    "target_process": "",
+    "arch": "x64",
+    "compile": {
+        "automatic": true,
+        "gcc": "x86_64-w64-mingw32-gcc",
+        "strip": true,
+        "output_type": "dll"
+    },
+    "output_dir": "./output"
+}

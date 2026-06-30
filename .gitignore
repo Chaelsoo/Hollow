@@ -1,0 +1,8 @@
+forge
+output/*.exe
+output/*.dll
+output/*.bin
+output/*.c
+*.bin
+*.exe
+*.dll
