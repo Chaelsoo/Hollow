@@ -1,22 +1,87 @@
 # Hollow
 
-A shellcode loader generator for red team engagements. hollow takes raw shellcode, encrypts it with AES-256-CBC, and compiles it into a Windows PE loader or DLL using one of six injection templates. The output is a single self-contained binary with no runtime dependencies beyond the Windows API and BCrypt.
+**hollow** is a shellcode loader generator. You give it a raw shellcode binary and a profile, and it spits out a compiled Windows PE loader with your shellcode encrypted inside.
 
-## How it works
+## Getting Started
 
-hollow follows a three-step pipeline.
+Binaries are available on the [releases](https://github.com/kanyo/hollow/releases) page, or build from source:
 
-**Encrypt.** The input shellcode is padded to a 16-byte boundary (PKCS7) and encrypted with AES-256-CBC. A fresh 256-bit key and 128-bit IV are randomly generated for each build. Both are embedded inside the compiled loader.
+```
+go build -o hollow .
+```
 
-**Substitute.** The selected C template contains placeholder tokens: `${SHELLCODE}`, `${KEY}`, `${IV}`, and `${TARGET_PROCESS}`. hollow replaces these with the encrypted byte arrays and the target executable path before the source ever touches the compiler.
+Requires `x86_64-w64-mingw32-gcc` for cross-compilation.
 
-**Compile.** The substituted C source is passed to `x86_64-w64-mingw32-gcc`, which produces a stripped, statically linked PE. Setting `automatic: false` in the profile skips compilation and writes the source to disk instead, so you can modify or compile it yourself.
+On Arch Linux: `pacman -S mingw-w64-gcc`
+On Debian/Ubuntu: `apt install gcc-mingw-w64-x86-64`
 
-At runtime, the loader decrypts the shellcode using Windows BCrypt (AES-256-CBC, in-place) and executes it via the chosen injection method. The key and IV are embedded in plaintext inside the binary, so this is not an evasion layer by itself. The actual evasion comes from the injection technique.
+## Usage
 
-## Templates
+```
+./hollow -shellcode payload.bin -profile profiles/new_process_injection_sc.json
+```
 
-### new_process_injection
+| Flag | Description |
+|------|-------------|
+| `-shellcode` | Path to raw shellcode (.bin) |
+| `-profile` | Path to a profile JSON file |
+| `-templates` | Templates directory (default: `./templates`) |
+
+## How does it work?
+
+hollow follows a three-step pipeline: **encrypt**, **substitute**, **compile**.
+
+Your shellcode is encrypted with AES-256-CBC using a randomly generated key and IV on every run. Both are embedded inside the output binary. The chosen C template then has its placeholders replaced with the encrypted shellcode, the key, and the IV, and the result is compiled into a stripped, statically linked PE by MinGW.
+
+At runtime, the loader decrypts the shellcode using Windows BCrypt and executes it using whichever injection technique the template implements.
+
+### Templates
+
+Templates are the C source files that implement the actual injection logic. Each one lives in `templates/` and contains placeholder tokens (`${SHELLCODE}`, `${KEY}`, `${IV}`, `${TARGET_PROCESS}`) that hollow fills in before compilation. You select a template through your profile.
+
+hollow ships with six templates:
+
+| Template | Technique |
+|----------|-----------|
+| `new_process_injection` | Remote thread injection into a freshly spawned process |
+| `new_process_injection_sc` | Same, via direct syscalls (Hell's Gate) |
+| `remote_thread_injection` | Classic remote thread injection into an existing process |
+| `remote_thread_injection_sc` | Same, via direct syscalls (Hell's Gate) |
+| `earlybird_apc` | Early Bird APC injection |
+| `dll_sideload` | DLL sideloading, produces a DLL instead of an EXE |
+
+You can write your own templates and drop them in `templates/` — hollow will pick them up automatically as long as your profile points to them.
+
+### Profiles
+
+Profiles are JSON files that tell hollow which template to use, what process to target, and how to compile the output. They live in `profiles/` and are meant to be customized per engagement.
+
+```json
+{
+    "name": "New Process Injection via Direct Syscalls",
+    "author": "",
+    "template": "new_process_injection_sc",
+    "target_process": "C:\\Windows\\System32\\cmd.exe",
+    "arch": "x64",
+    "compile": {
+        "automatic": true,
+        "gcc": "x86_64-w64-mingw32-gcc",
+        "strip": true,
+        "output_type": "exe"
+    },
+    "output_dir": "./output"
+}
+```
+
+`output_type` is either `exe` or `dll`. Set `automatic: false` to dump the substituted C source to disk instead of compiling it, useful if you want to modify the code before building.
+
+The output file is written to `output_dir`, named `{template}_loader.{exe|dll}`.
+
+## Templates in detail
+
+### New Process Injection
+
+Template: `new_process_injection`
 
 **Technique:** Remote Thread Injection into a freshly spawned process.
 
@@ -24,13 +89,21 @@ Spawns the target process with `CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW`, w
 
 Win32 calls: `CreateProcessA`, `VirtualAllocEx`, `WriteProcessMemory`, `VirtualProtectEx`, `CreateRemoteThread`.
 
-### new_process_injection_sc
+---
+
+### New Process Injection via Direct Syscalls
+
+Template: `new_process_injection_sc`
 
 **Technique:** Remote Thread Injection into a freshly spawned process, via direct syscalls (Hell's Gate).
 
 Same behavior as `new_process_injection`, but every allocation and threading call bypasses the Win32 layer entirely. SSNs are resolved from ntdll at runtime and executed via the raw `syscall` instruction. See the benchmark section.
 
-### remote_thread_injection
+---
+
+### Remote Thread Injection
+
+Template: `remote_thread_injection`
 
 **Technique:** Classic Remote Thread Injection into an existing process.
 
@@ -38,23 +111,37 @@ Finds a running process by name using `CreateToolhelp32Snapshot`, opens a handle
 
 Win32 calls: `OpenProcess`, `VirtualAllocEx`, `WriteProcessMemory`, `VirtualProtectEx`, `CreateRemoteThread`.
 
-### remote_thread_injection_sc
+---
+
+### Remote Thread Injection via Direct Syscalls
+
+Template: `remote_thread_injection_sc`
 
 **Technique:** Classic Remote Thread Injection into an existing process, via direct syscalls (Hell's Gate).
 
 Same behavior as `remote_thread_injection`, bypassing the Win32 layer. See the benchmark section.
 
-### earlybird_apc
+---
+
+### Early Bird APC Injection
+
+Template: `earlybird_apc`
 
 **Technique:** Early Bird APC Injection (CyberArk, 2018).
 
 Spawns the target process in a suspended state (`CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW`), writes the decrypted shellcode into its address space, then queues an Asynchronous Procedure Call (APC) to the main thread pointing at the shellcode via `QueueUserAPC`, and resumes with `ResumeThread`. Because the APC fires before the process entry point runs, the shellcode executes before any defensive tooling in the process has initialized. Avoids the `VirtualAllocEx + WriteProcessMemory + CreateRemoteThread` triad entirely.
 
-### dll_sideload
+---
+
+### DLL Sideload
+
+Template: `dll_sideload`
 
 **Technique:** DLL Sideloading / In-Process Shellcode Execution.
 
 Produces a DLL instead of an EXE. On `DLL_PROCESS_ATTACH`, a thread is spawned that decrypts and executes the shellcode in-process: `VirtualAlloc`, `memcpy`, `VirtualProtect`, then a direct function call into the shellcode. The host process must remain alive while the payload initializes (around 10 seconds for a Sliver beacon). Deploy by dropping the DLL in a location where a legitimate binary will load it via a missing DLL search path entry.
+
+---
 
 ## Benchmark: Win32 vs. direct syscalls
 
@@ -79,55 +166,10 @@ On systems where ntdll stubs are patched by a full EDR (prologue replaced with a
 
 The loader code adds roughly 19 KB of overhead. Output size is essentially the size of the input shellcode. A 17 MB Sliver beacon produces an 18 MB loader. A typical Metasploit shellcode (~200 KB) would produce a ~220 KB loader.
 
-## Usage
+## Blog
 
-### Build
+I will be detailing the concepts behind each technique and the full usage of hollow on my blog very soon. Stay tuned.
 
-```
-go build -o hollow .
-```
+## References
 
-Requires `x86_64-w64-mingw32-gcc` in PATH for cross-compilation.
-
-### Generate a loader
-
-```
-./hollow -shellcode payload.bin -profile profiles/new_process_injection_sc.json
-```
-
-| Flag | Description |
-|------|-------------|
-| `-shellcode` | Path to raw shellcode (.bin) |
-| `-profile` | Path to a profile JSON file |
-| `-templates` | Templates directory (default: `./templates`) |
-
-The output file is written to the `output_dir` specified in the profile, named `{template}_loader.{exe|dll}`.
-
-### Profile format
-
-```json
-{
-    "name": "New Process Injection via Direct Syscalls",
-    "author": "",
-    "template": "new_process_injection_sc",
-    "target_process": "C:\\Windows\\System32\\cmd.exe",
-    "arch": "x64",
-    "compile": {
-        "automatic": true,
-        "gcc": "x86_64-w64-mingw32-gcc",
-        "strip": true,
-        "output_type": "exe"
-    },
-    "output_dir": "./output"
-}
-```
-
-`output_type` is either `exe` or `dll`. `strip: true` passes `-s` to GCC to remove the symbol table. Set `automatic: false` to write the substituted C source to `output_dir/loader.c` instead of compiling.
-
-## Requirements
-
-- Go 1.21+
-- `x86_64-w64-mingw32-gcc` (MinGW-w64 cross-compiler)
-
-On Arch Linux: `pacman -S mingw-w64-gcc`
-On Debian/Ubuntu: `apt install gcc-mingw-w64-x86-64`
+- [ldrgen](https://github.com/gatariee/ldrgen) by gatari — inspiration and reference for shellcode loader design
