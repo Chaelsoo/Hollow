@@ -172,4 +172,4 @@ I will be detailing the concepts behind each technique and the full usage of hol
 
 ## References
 
-- [ldrgen](https://github.com/gatariee/ldrgen) by gatari — inspiration and reference for shellcode loader design
+- [ldrgen](https://github.com/gatariee/ldrgen) by gatari, inspiration and reference for shellcode loader design
