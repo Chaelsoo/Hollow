@@ -1,4 +1,4 @@
-# hollow
+# Hollow
 
 A shellcode loader generator for red team engagements. hollow takes raw shellcode, encrypts it with AES-256-CBC, and compiles it into a Windows PE loader or DLL using one of six injection templates. The output is a single self-contained binary with no runtime dependencies beyond the Windows API and BCrypt.
 
