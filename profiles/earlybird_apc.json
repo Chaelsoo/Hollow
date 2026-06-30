@@ -1,7 +1,7 @@
 {
     "name": "EarlyBird APC",
     "author": "mold",
-    "template": "earlybird",
+    "template": "earlybird_apc",
     "target_process": "C:\\Windows\\System32\\cmd.exe",
     "arch": "x64",
     "compile": {

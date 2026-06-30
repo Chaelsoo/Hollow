@@ -1,4 +1,4 @@
-# Hollow
+# hollow
 
 A shellcode loader generator for red team engagements. hollow takes raw shellcode, encrypts it with AES-256-CBC, and compiles it into a Windows PE loader or DLL using one of six injection templates. The output is a single self-contained binary with no runtime dependencies beyond the Windows API and BCrypt.
 
@@ -16,54 +16,68 @@ At runtime, the loader decrypts the shellcode using Windows BCrypt (AES-256-CBC,
 
 ## Templates
 
-### spawn
+### new_process_injection
 
-Spawns the target process with `CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW`, waits two seconds for it to initialize, then injects shellcode into its address space and starts a remote thread. The BREAKAWAY flag is required when the loader is launched from WinRM, which wraps all processes in a job object. Uses the Win32 injection triad: `VirtualAllocEx`, `WriteProcessMemory`, `VirtualProtectEx`, `CreateRemoteThread`. Target is a full executable path.
+**Technique:** Remote Thread Injection into a freshly spawned process.
 
-### spawn_sc
+Spawns the target process with `CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW`, waits two seconds for it to initialize, then allocates memory in its address space, writes the decrypted shellcode, marks it executable, and creates a remote thread pointing at it. The BREAKAWAY flag is required when the loader is launched from WinRM, which wraps all processes in a job object. Target is a full executable path.
 
-Same behavior as spawn, but every allocation and threading call goes through the kernel directly via the `syscall` instruction rather than through Win32. See the benchmark section below.
+Win32 calls: `CreateProcessA`, `VirtualAllocEx`, `WriteProcessMemory`, `VirtualProtectEx`, `CreateRemoteThread`.
 
-### inject
+### new_process_injection_sc
 
-Opens an existing process by name using `CreateToolhelp32Snapshot`, then injects shellcode via remote thread. No process is spawned. Best used against long-lived processes like `explorer.exe`. Target is a process image name, not a full path. Same Win32 injection triad as spawn.
+**Technique:** Remote Thread Injection into a freshly spawned process, via direct syscalls (Hell's Gate).
 
-### inject_sc
+Same behavior as `new_process_injection`, but every allocation and threading call bypasses the Win32 layer entirely. SSNs are resolved from ntdll at runtime and executed via the raw `syscall` instruction. See the benchmark section.
 
-Same behavior as inject, direct syscall variant. See the benchmark section below.
+### remote_thread_injection
 
-### earlybird
+**Technique:** Classic Remote Thread Injection into an existing process.
 
-Early-Bird APC injection. Spawns the target process suspended with `CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW`, queues an APC to the main thread pointing at the decrypted shellcode via `QueueUserAPC`, then resumes with `ResumeThread`. The shellcode executes before the process entry point runs. Avoids the `VirtualAllocEx + WriteProcessMemory + CreateRemoteThread` triad entirely.
+Finds a running process by name using `CreateToolhelp32Snapshot`, opens a handle to it, then allocates memory, writes the shellcode, and creates a remote thread. No new process is spawned. Best used against long-lived processes like `explorer.exe`. Target is a process image name, not a full path.
 
-### sideload
+Win32 calls: `OpenProcess`, `VirtualAllocEx`, `WriteProcessMemory`, `VirtualProtectEx`, `CreateRemoteThread`.
 
-Produces a DLL instead of an EXE. On `DLL_PROCESS_ATTACH`, a thread is created that decrypts and executes the shellcode in-process using `VirtualAlloc`, `memcpy`, `VirtualProtect`, then a direct call. The host process must remain alive while the beacon initializes (around 10 seconds). Deploy by dropping the DLL somewhere a legitimate binary will load it.
+### remote_thread_injection_sc
+
+**Technique:** Classic Remote Thread Injection into an existing process, via direct syscalls (Hell's Gate).
+
+Same behavior as `remote_thread_injection`, bypassing the Win32 layer. See the benchmark section.
+
+### earlybird_apc
+
+**Technique:** Early Bird APC Injection (CyberArk, 2018).
+
+Spawns the target process in a suspended state (`CREATE_SUSPENDED | CREATE_BREAKAWAY_FROM_JOB | CREATE_NO_WINDOW`), writes the decrypted shellcode into its address space, then queues an Asynchronous Procedure Call (APC) to the main thread pointing at the shellcode via `QueueUserAPC`, and resumes with `ResumeThread`. Because the APC fires before the process entry point runs, the shellcode executes before any defensive tooling in the process has initialized. Avoids the `VirtualAllocEx + WriteProcessMemory + CreateRemoteThread` triad entirely.
+
+### dll_sideload
+
+**Technique:** DLL Sideloading / In-Process Shellcode Execution.
+
+Produces a DLL instead of an EXE. On `DLL_PROCESS_ATTACH`, a thread is spawned that decrypts and executes the shellcode in-process: `VirtualAlloc`, `memcpy`, `VirtualProtect`, then a direct function call into the shellcode. The host process must remain alive while the payload initializes (around 10 seconds for a Sliver beacon). Deploy by dropping the DLL in a location where a legitimate binary will load it via a missing DLL search path entry.
 
 ## Benchmark: Win32 vs. direct syscalls
 
 Tested on Windows 10 Build 19041, Windows Defender realtime protection enabled, definitions 1.453.354.0, with a 17 MB Donut-wrapped Sliver beacon as the payload:
 
-| Template   | Defender behavioral alert            | Session established |
-|------------|--------------------------------------|---------------------|
-| spawn      | Trojan:Win64/AsyncRat.RPY!MTB        | yes                 |
-| inject     | Trojan:Win64/AsyncRat.RPY!MTB        | yes                 |
-| earlybird  | none                                 | yes                 |
-| sideload   | none                                 | yes                 |
-| spawn_sc   | none                                 | yes                 |
-| inject_sc  | none                                 | yes                 |
+| Template                   | Defender behavioral alert     | Session established |
+|----------------------------|-------------------------------|---------------------|
+| new_process_injection      | Trojan:Win64/AsyncRat.RPY!MTB | yes                 |
+| remote_thread_injection    | Trojan:Win64/AsyncRat.RPY!MTB | yes                 |
+| earlybird_apc              | none                          | yes                 |
+| dll_sideload               | none                          | yes                 |
+| new_process_injection_sc   | none                          | yes                 |
+| remote_thread_injection_sc | none                          | yes                 |
 
 `Trojan:Win64/AsyncRat.RPY!MTB` is a machine-threat-behavior rule triggered by the classic remote injection sequence: `VirtualAllocEx` + `WriteProcessMemory` + `CreateRemoteThread` called on a remote process handle through the Win32 API layer. Defender registers a kernel callback that fires when these three calls appear in sequence.
 
-The spawn_sc and inject_sc templates bypass this by never calling those Win32 functions. Instead, they resolve the corresponding Windows kernel function numbers (syscall service numbers, or SSNs) directly from ntdll at runtime, then execute them via the raw `syscall` instruction. Defender's callback never fires because the monitored wrappers are never invoked.
+The `_sc` templates bypass this by never calling those Win32 functions. Instead, they resolve the corresponding kernel syscall service numbers (SSNs) directly from ntdll at runtime using Hell's Gate: every unhooked ntdll stub starts with the four-byte prologue `4C 8B D1 B8`, and the SSN sits at offset 4. The actual syscall is a GCC naked function containing nothing but `movq %rcx, %r10 / movl ssn(%rip), %eax / syscall / ret`, which is the exact sequence the ntdll stub itself would execute. Defender's callback never fires because the monitored Win32 wrappers are never invoked.
 
-SSN resolution uses Hell's Gate. Every ntdll stub that has not been patched by an EDR starts with the four-byte sequence `4C 8B D1 B8`. The two bytes at offset 4 are the SSN. hollow reads that value at runtime and stores it before the injection begins. The actual syscall is a GCC naked function containing nothing but `movq %rcx, %r10 / movl ssn(%rip), %eax / syscall / ret`, which is the exact instruction sequence the ntdll stub itself would execute.
-
-On systems where ntdll stubs are patched by a full EDR (the prologue is replaced with a jump), the clean-stub check will fail and the loader will exit early rather than guess. Halo's Gate (scanning neighboring stubs to infer the SSN) is not implemented.
+On systems where ntdll stubs are patched by a full EDR (prologue replaced with a jump), the clean-stub check fails and the loader exits early. Halo's Gate (scanning neighboring stubs to infer the SSN) is not implemented.
 
 ## Binary size
 
-The loader code itself adds roughly 19 KB of overhead. The output binary size is essentially the size of the input shellcode. A 17 MB Sliver beacon produces an 18 MB loader. A typical Metasploit meterpreter shellcode (~200 KB) would produce a ~220 KB loader.
+The loader code adds roughly 19 KB of overhead. Output size is essentially the size of the input shellcode. A 17 MB Sliver beacon produces an 18 MB loader. A typical Metasploit shellcode (~200 KB) would produce a ~220 KB loader.
 
 ## Usage
 
@@ -78,7 +92,7 @@ Requires `x86_64-w64-mingw32-gcc` in PATH for cross-compilation.
 ### Generate a loader
 
 ```
-./hollow -shellcode payload.bin -profile profiles/spawn_sc.json
+./hollow -shellcode payload.bin -profile profiles/new_process_injection_sc.json
 ```
 
 | Flag | Description |
@@ -93,9 +107,9 @@ The output file is written to the `output_dir` specified in the profile, named `
 
 ```json
 {
-    "name": "Direct Syscall Spawn",
+    "name": "New Process Injection via Direct Syscalls",
     "author": "",
-    "template": "spawn_sc",
+    "template": "new_process_injection_sc",
     "target_process": "C:\\Windows\\System32\\cmd.exe",
     "arch": "x64",
     "compile": {

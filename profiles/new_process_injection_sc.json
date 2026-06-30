@@ -1,8 +1,8 @@
 {
-    "name": "Direct Syscall Remote Thread Injection",
+    "name": "Direct Syscall Process Hollowing",
     "author": "mold",
-    "template": "inject_sc",
-    "target_process": "explorer.exe",
+    "template": "new_process_injection_sc",
+    "target_process": "C:\\Windows\\System32\\cmd.exe",
     "arch": "x64",
     "compile": {
         "automatic": true,

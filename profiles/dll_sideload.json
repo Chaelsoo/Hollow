@@ -1,14 +1,14 @@
 {
-    "name": "Remote Thread Injection",
+    "name": "DLL Sideload",
     "author": "mold",
-    "template": "inject",
-    "target_process": "explorer.exe",
+    "template": "dll_sideload",
+    "target_process": "",
     "arch": "x64",
     "compile": {
         "automatic": true,
         "gcc": "x86_64-w64-mingw32-gcc",
         "strip": true,
-        "output_type": "exe"
+        "output_type": "dll"
     },
     "output_dir": "./output"
 }

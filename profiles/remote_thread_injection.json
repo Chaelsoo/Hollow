@@ -1,8 +1,8 @@
 {
-    "name": "Process Hollow",
+    "name": "Remote Thread Injection",
     "author": "mold",
-    "template": "spawn",
-    "target_process": "C:\\Windows\\System32\\cmd.exe",
+    "template": "remote_thread_injection",
+    "target_process": "explorer.exe",
     "arch": "x64",
     "compile": {
         "automatic": true,

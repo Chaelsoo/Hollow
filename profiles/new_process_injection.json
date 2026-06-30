@@ -1,8 +1,8 @@
 {
-    "name": "Direct Syscall Process Hollowing",
+    "name": "Process Hollow",
     "author": "mold",
-    "template": "spawn_sc",
-    "target_process": "C:\\Windows\\System32\\cmd.exe",
+    "template": "new_process_injection",
+    "target_process": "C:\\Windows\\System32\\svchost.exe",
     "arch": "x64",
     "compile": {
         "automatic": true,

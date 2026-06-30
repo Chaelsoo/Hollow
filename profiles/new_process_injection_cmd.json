@@ -1,8 +1,8 @@
 {
     "name": "Process Hollow",
     "author": "mold",
-    "template": "spawn",
-    "target_process": "C:\\Windows\\System32\\svchost.exe",
+    "template": "new_process_injection",
+    "target_process": "C:\\Windows\\System32\\cmd.exe",
     "arch": "x64",
     "compile": {
         "automatic": true,
