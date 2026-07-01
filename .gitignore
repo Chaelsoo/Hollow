@@ -6,3 +6,5 @@ output/*.c
 *.bin
 *.exe
 *.dll
+hollow_linux_amd64
+hollow_windows_amd64.exe
