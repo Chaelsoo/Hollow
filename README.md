@@ -166,6 +166,12 @@ On systems where ntdll stubs are patched by a full EDR (prologue replaced with a
 
 The loader code adds roughly 19 KB of overhead. Output size is essentially the size of the input shellcode. A 17 MB Sliver beacon produces an 18 MB loader. A typical Metasploit shellcode (~200 KB) would produce a ~220 KB loader.
 
+## Contributing
+
+Contributions are welcome. If you have a template you've written and want to add it, or improvements to existing ones, feel free to open a PR. If you find a bug or have a suggestion, open an issue.
+
+The goal of this tool is to make the loader development process easier, not to be a finished product. New templates, better profiles, and improvements to the core are all fair game. hollow was also built with the intent of helping people understand the concepts behind shellcode loaders and injection techniques, so clear and readable template code is just as valuable as functionality.
+
 ## Blog
 
 I will be detailing the concepts behind each technique and the full usage of hollow on my blog very soon. Stay tuned.
